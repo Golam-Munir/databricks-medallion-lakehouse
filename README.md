@@ -1,4 +1,4 @@
-🧱 # Databricks Medallion Lakehouse
+# Databricks Medallion Lakehouse 
 
 A production-grade data lakehouse implementation demonstrating end-to-end data engineering fundamentals: ingestion, transformation, dimensional modeling, and orchestration on Databricks.
 
