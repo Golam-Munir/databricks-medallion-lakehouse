@@ -32,6 +32,9 @@ Gold Delta Tables (Star schema, business-ready)
     ↓ [SQL: SELECT * FROM gold.dim_customers]
 Analytics / BI Tools
 ```
+
+---
+
 ## Transformation Logic
 
 ### Bronze Layer (Load)
@@ -47,14 +50,14 @@ for each CSV file:
 
 **Key Options**:
 - `header=true`: First row is column names
-- `inferSchema=true`: Spark infers data types
-- `mode=overwrite`: Replace if table exists (idempotent)
+- `inferSchema=true`: Spark infers data types automatically
+- `mode=overwrite`: Replace if table exists (safe to re-run)
 
-**Why Delta**:
+**Why Delta (not Parquet)**:
 - ACID guarantees (all-or-nothing writes)
 - Schema validation
 - Time travel (query old versions)
-- Transaction logs
+- Transaction logs for auditing
 
 ---
 
@@ -80,13 +83,13 @@ from pyspark.sql.functions import trim, col, when
 # Read Bronze
 df = spark.read.table("`databricks-medallion-lakehouse`.bronze.cust_info")
 
-# Step 1: Trim spaces
+# Step 1: Trim spaces from all string columns
 df_clean = df.select([
-    trim(col(c)).alias(c) if is_string(c) else col(c)
+    trim(col(c)).alias(c) if df.schema[c].dataType.simpleString() == "string" else col(c)
     for c in df.columns
 ])
 
-# Step 2: Standardize codes
+# Step 2: Standardize gender codes
 df_clean = df_clean.withColumn(
     "cst_gndr",
     when(col("cst_gndr") == "M", "Male")
@@ -94,10 +97,10 @@ df_clean = df_clean.withColumn(
     .otherwise("Unknown")
 )
 
-# Step 3: Deduplicate
+# Step 3: Deduplicate by primary key
 df_clean = df_clean.dropDuplicates(["customer_id"])
 
-# Step 4: Write
+# Step 4: Write to Silver
 df_clean.write.mode("overwrite").format("delta").saveAsTable(...)
 ```
 
@@ -110,31 +113,31 @@ df_clean.write.mode("overwrite").format("delta").saveAsTable(...)
 #### Dimensional Model (Star Schema)
 
 ```
-                    ┌─────────────────────────┐
-                    │     dim_customers        │
-                    │  customer_id (PK)        │
-                    │  first_name, last_name   │
-                    │  gender, marital_status  │
-                    │  country, birthdate      │
-                    └────────────┬────────────┘
-                                 │
-                    ┌────────────▼────────────┐
-                    │       fact_sales         │
-                    │  order_number (PK)       │
-                    │  customer_key (FK) ──────┘
-                    │  product_key (FK) ───────┐
-                    │  order_date              │
-                    │  sales_amount            │
-                    │  quantity, price         │
-                    └────────────┬────────────┘
-                                 │
-                    ┌────────────▼────────────┐
-                    │      dim_products        │
-                    │  product_id (PK)         │
-                    │  product_name, cost      │
-                    │  category, subcategory   │
-                    │  product_line            │
-                    └─────────────────────────┘
+          ┌─────────────────────────┐
+          │     dim_customers        │
+          │  customer_id (PK)        │
+          │  first_name, last_name   │
+          │  gender, marital_status  │
+          │  country, birthdate      │
+          └────────────┬────────────┘
+                       │ FK
+          ┌────────────▼────────────┐
+          │       fact_sales         │
+          │  order_number (PK)       │
+          │  customer_key (FK)       │
+          │  product_key (FK)        │
+          │  order_date              │
+          │  sales_amount            │
+          │  quantity, price         │
+          └────────────┬────────────┘
+                       │ FK
+          ┌────────────▼────────────┐
+          │      dim_products        │
+          │  product_id (PK)         │
+          │  product_name, cost      │
+          │  category, subcategory   │
+          │  product_line            │
+          └─────────────────────────┘
 ```
 
 #### Example: Build fact_sales
@@ -161,7 +164,7 @@ fact_sales = sales \
 fact_sales.write.mode("overwrite").format("delta").saveAsTable(...)
 ```
 
-**Why Left Joins**: Preserves all sales even if customer/product missing (shows data quality issues).
+**Why Left Joins**: Preserves all sales even if customer/product is missing. Shows data quality issues rather than silently dropping rows.
 
 ---
 
@@ -178,44 +181,41 @@ fact_sales.write.mode("overwrite").format("delta").saveAsTable(...)
 ### Query Performance
 
 ```sql
--- Simple aggregation (fast)
-SELECT COUNT(*) FROM gold.fact_sales;  -- < 1s
+-- Simple aggregation (fast, < 1s)
+SELECT COUNT(*) FROM gold.fact_sales;
 
--- Fact + Dimension join (acceptable)
-SELECT c.gender, COUNT(*) 
+-- Fact + Dimension join (1-2s)
+SELECT c.gender, COUNT(*)
 FROM gold.fact_sales f
 JOIN gold.dim_customers c ON f.customer_key = c.customer_id
-GROUP BY c.gender;  -- 1-2s
+GROUP BY c.gender;
 
--- Multi-table join (may slow)
+-- Multi-table join (2-3s)
 SELECT p.category, SUM(f.sales_amount)
 FROM gold.fact_sales f
 JOIN gold.dim_customers c ON f.customer_key = c.customer_id
 JOIN gold.dim_products p ON f.product_key = p.product_id
-GROUP BY p.category;  -- 2-3s
+GROUP BY p.category;
 ```
 
 ### Future Optimizations
 
-1. **Partitioning by Date**
+1. **Partitioning by Date** — Queries on date ranges 10x faster
 ```python
-   df.write \
-       .partitionBy("order_date") \
-       .mode("overwrite") \
-       .format("delta") \
-       .saveAsTable(...)
+df.write.partitionBy("order_date").mode("overwrite").format("delta").saveAsTable(...)
 ```
-   Impact: Queries on date ranges 10x faster.
 
-2. **Z-Ordering**
-```python
-   spark.sql("OPTIMIZE gold.fact_sales ZORDER BY (customer_key, product_key)")
+2. **Z-Ordering** — Join performance +50%
+```sql
+OPTIMIZE gold.fact_sales ZORDER BY (customer_key, product_key)
 ```
-   Impact: Join performance +50%.
 
-3. **Pre-aggregations**
-   Create `agg_sales_by_month` (1-2 rows per month).
-   Impact: Dashboard queries 100x faster.
+3. **Pre-aggregations** — Dashboard queries 100x faster
+```sql
+CREATE TABLE gold.agg_sales_monthly AS
+SELECT DATE_TRUNC('month', order_date) as month, SUM(sales_amount) as total_sales
+FROM gold.fact_sales GROUP BY 1;
+```
 
 ---
 
@@ -225,40 +225,44 @@ GROUP BY p.category;  -- 2-3s
 
 | Issue | Bronze | Silver | Resolution |
 |---|---|---|---|
-| Invalid dates (00000000) | 19 occurrences | → NULL | use `try_to_date()` |
-| NULL product costs | 2 products | → 0 | when() + coalesce() |
-| Duplicate products | 102 rows | Removed | Keep latest by date |
-| Mismatched ID formats | ERP strings | Extracted | substring() + cast() |
+| Invalid dates (00000000) | 19 occurrences | → NULL | `try_to_date()` instead of `to_date()` |
+| NULL product costs | 2 products | → 0 | `when(col().isNull(), 0)` |
+| Duplicate products | 102 rows | Removed | Keep latest by `prd_start_dt` |
+| Mismatched ID formats | ERP strings (NASAW00011000) | Extracted integer | `substring() + cast(IntegerType())` |
 
-### Monitoring (Not Implemented, But Recommended)
+### Monitoring Pattern (Recommended for Production)
 
 ```python
-# Add after each transformation
-print(f"NULL counts: {df.select([count(when(col(c).isNull(), 1)) for c in df.columns])}")
-print(f"Duplicates: {df.count() - df.dropDuplicates(['key']).count()}")
+# Add after each transformation layer
+def data_quality_check(df, table_name):
+    print(f"\nData Quality: {table_name}")
+    print(f"  Total rows: {df.count():,}")
+    for c in df.columns:
+        null_count = df.filter(col(c).isNull()).count()
+        if null_count > 0:
+            print(f"  NULLs in {c}: {null_count:,}")
 ```
 
 ---
 
 ## Lessons & Trade-offs
 
-### Design Decisions
-
 | Decision | Why | Trade-off |
 |---|---|---|
 | **Left Joins** | Keep all data, show quality issues | Some NULLs in result |
-| **Keep Latest** (SCD Type 1) | Simpler, faster | Can't track history |
-| **No Aggregations** | Flexibility, re-use facts | Slower queries |
-| **PySpark for Silver** | Flexible, programmatic | Harder for analysts to modify |
-| **SQL for Gold** | Business-readable, auditable | Less flexible |
+| **SCD Type 1** (overwrite) | Simpler, faster | Can't track historical changes |
+| **No Pre-aggregations** | Flexibility, re-use facts | Slightly slower dashboard queries |
+| **PySpark for Silver** | Flexible, programmatic | Harder for non-engineers to modify |
+| **SQL for Gold** | Business-readable, auditable | Less programmatic flexibility |
+| **Config files** | Separation of concerns, scalable | One extra file to maintain |
 
 ---
 
 ## Next Steps for Production
 
-1. **Incremental Loading**: MERGE (upsert) instead of OVERWRITE
-2. **Orchestration**: Databricks Jobs + scheduling
-3. **Monitoring**: Data quality checks, SLA alerts
-4. **Documentation**: Data dictionary, lineage mapping
-5. **Access Control**: Row-level security, column masking
-6. **Backup**: Cross-region replication
+1. **Incremental Loading** — MERGE (upsert) instead of full OVERWRITE
+2. **Orchestration** — Databricks Jobs with Bronze → Silver → Gold dependencies
+3. **Data Quality Monitoring** — Automated NULL/duplicate checks, SLA alerts
+4. **Slowly Changing Dimensions** — Type 2 SCD to track customer/product history
+5. **Access Control** — Row-level security, column masking via Unity Catalog
+6. **CI/CD Pipeline** — Automated testing on pull requests before merge
