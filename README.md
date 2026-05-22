@@ -1,8 +1,17 @@
-# Databricks Medallion Lakehouse 
+# Databricks Medallion Lakehouse
 
-A production-grade data lakehouse implementation demonstrating end-to-end data engineering fundamentals: ingestion, transformation, dimensional modeling, and orchestration on Databricks.
+![Databricks](https://img.shields.io/badge/Databricks-FF3621?style=for-the-badge&logo=databricks&logoColor=white)
+![PySpark](https://img.shields.io/badge/Apache%20Spark-E25A1C?style=for-the-badge&logo=apachespark&logoColor=white)
+![Delta Lake](https://img.shields.io/badge/Delta%20Lake-003366?style=for-the-badge&logo=delta&logoColor=white)
+![Python](https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white)
+![SQL](https://img.shields.io/badge/SQL-4479A1?style=for-the-badge&logo=mysql&logoColor=white)
+![Status](https://img.shields.io/badge/Status-Complete-brightgreen?style=for-the-badge)
 
-**Portfolio Goal:** Showcase cloud-native data engineering skills (Databricks, PySpark, Delta Lake, SQL) and dimensional data modeling for the Australian market.
+A production-grade data lakehouse built on Databricks using the **Medallion Architecture** (Bronze → Silver → Gold). Demonstrates end-to-end data engineering: ingestion, cleaning, dimensional modeling, and orchestration using PySpark, Delta Lake, and SQL.
+
+> **Portfolio Project** — Built as part of a Data Engineering career transition. Designed for the Australian DE job market.
+
+**Portfolio Goal:** Showcase cloud-native data engineering skills (Databricks, PySpark, Delta Lake, SQL) and dimensional data modelling for the Australian market.
 
 ---
 
@@ -20,24 +29,34 @@ This project demonstrates the **industry-standard solution**: a structured lakeh
 ## Solution Architecture
 
 ### Medallion Pattern (Bronze → Silver → Gold)
-Raw CSV Files (6 sources)
-↓
-BRONZE LAYER
-├─ Raw copy, no transformation
-├─ Audit trail, compliance
-├─ 6 Delta tables (18,494 - 60,398 rows)
-↓
-SILVER LAYER
-├─ Cleaned & standardized
-├─ Trimmed spaces, deduplicated, codes standardized
-├─ Single source of truth
-├─ 6 Delta tables (295 - 27,659 rows)
-↓
-GOLD LAYER
-├─ Business-ready dimensional model
-├─ Star schema: dim_customers, dim_products, fact_sales
-├─ Analytics-optimized
-└─ 3 Delta tables (295 - 27,659 rows)
+
+```
+Raw CSV Files (CRM + ERP)
+         │
+         ▼
+┌─────────────────────┐
+│    BRONZE LAYER     │  Raw copy, no transformation
+│  6 Delta Tables     │  Audit trail, compliance
+│  18,494 - 60,398    │  Full reload on each run
+└─────────────────────┘
+         │
+         ▼
+┌─────────────────────┐
+│    SILVER LAYER     │  Cleaned & standardized
+│  6 Delta Tables     │  Trimmed, deduplicated
+│  295 - 27,659 rows  │  Single source of truth
+└─────────────────────┘
+         │
+         ▼
+┌─────────────────────┐
+│     GOLD LAYER      │  Business-ready star schema
+│  3 Delta Tables     │  dim_customers, dim_products
+│  295 - 27,659 rows  │  fact_sales
+└─────────────────────┘
+         │
+         ▼
+  Analytics / BI Tools
+```
 
 ### Data Lineage
 
@@ -87,25 +106,25 @@ GOLD LAYER
 ---
 
 ## Project Structure
+## Project Structure
+
+```
 databricks-medallion-lakehouse/
 ├── notebooks/
 │   ├── bronze/
-│   │   └── 01_bronze_load.ipynb              # Load 6 CSVs to Delta
+│   │   └── 01_bronze_load.ipynb              # Load 6 CSVs → Bronze Delta tables
 │   ├── silver/
-│   │   ├── 02a_silver_cust_info.ipynb        # Customer cleaning
-│   │   ├── 02b_silver_prd_info.ipynb         # Product cleaning
-│   │   ├── 02c_silver_sales_details.ipynb    # Sales + date conversion
-│   │   └── 02d_silver_erp_tables.ipynb       # ERP tables (loop)
+│   │   ├── 02a_silver_cust_info.ipynb        # Trim, standardize gender/marital codes
+│   │   ├── 02b_silver_prd_info.ipynb         # Dedup products, handle NULL costs
+│   │   ├── 02c_silver_sales_details.ipynb    # Convert integer dates → DATE type
+│   │   └── 02d_silver_erp_tables.ipynb       # ERP tables (loop pattern)
 │   └── gold/
-│       └── 03_gold_model.ipynb               # Star schema
+│       └── 03_gold_model.ipynb               # Build star schema (dim + fact)
 ├── scripts/
-│   ├── bronze_config.py                      # Path config for 6 CSVs
-│   └── silver_config.py                      # Transformation config
-├── datasets/
-│   └── engineering/
-│       ├── source_crm/                       # Customer, product, sales
-│       └── source_erp/                       # ERP supplements
-└── README.md (this file)
+│   ├── bronze_config.py                      # CSV file paths (config over code)
+│   └── silver_config.py                      # Table transformation config
+└── README.md
+```
 
 ---
 
@@ -139,12 +158,16 @@ databricks-medallion-lakehouse/
 
 **Option 1: Run Notebooks Sequentially**
 
-notebooks/bronze/01_bronze_load.ipynb
-notebooks/silver/02a_silver_cust_info.ipynb
-notebooks/silver/02b_silver_prd_info.ipynb
-notebooks/silver/02c_silver_sales_details.ipynb
-notebooks/silver/02d_silver_erp_tables.ipynb
-notebooks/gold/03_gold_model.ipynb
+**Run Notebooks in This Order:**
+
+```
+Step 1:  notebooks/bronze/01_bronze_load.ipynb
+Step 2:  notebooks/silver/02a_silver_cust_info.ipynb
+Step 3:  notebooks/silver/02b_silver_prd_info.ipynb
+Step 4:  notebooks/silver/02c_silver_sales_details.ipynb
+Step 5:  notebooks/silver/02d_silver_erp_tables.ipynb
+Step 6:  notebooks/gold/03_gold_model.ipynb
+```
 
 
 **Option 2: Create a Databricks Job (Production)**
