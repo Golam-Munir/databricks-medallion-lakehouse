@@ -3,30 +3,35 @@
 ## System Design
 
 ### Databricks Environment
+
+```
 Databricks Community Edition
 ├── Catalog: databricks-medallion-lakehouse
 │   ├── Schema: bronze
 │   │   ├── Volume: source_system (6 CSV files)
 │   │   └── Tables: cust_info, prd_info, sales_details, cust_az12, loc_a101, px_cat_g1v2
 │   ├── Schema: silver
-│   │   ├── Tables: cust_info, prd_info, sales_details, cust_az12, loc_a101, px_cat_g1v2
+│   │   └── Tables: cust_info, prd_info, sales_details, cust_az12, loc_a101, px_cat_g1v2
 │   └── Schema: gold
 │       ├── Table: dim_customers (18,485 rows)
 │       ├── Table: dim_products (295 rows)
 │       └── Table: fact_sales (27,659 rows)
 └── Git Integration: Auto-sync with GitHub
+```
 
 ### Data Flow
-CSV Files (Volumes)
-↓ [PySpark: spark.read.csv()]
-Bronze Delta Tables (Raw, no transforms)
-↓ [PySpark: trim, when, dropDuplicates]
-Silver Delta Tables (Clean, standardized)
-↓ [Spark SQL: joins, aggregations]
-Gold Delta Tables (Star schema, business-ready)
-↓ [SQL: SELECT * FROM gold.dim_customers]
-Analytics / BI Tools
 
+```
+CSV Files (Volumes)
+    ↓ [PySpark: spark.read.csv()]
+Bronze Delta Tables (Raw, no transforms)
+    ↓ [PySpark: trim, when, dropDuplicates]
+Silver Delta Tables (Clean, standardized)
+    ↓ [Spark SQL: joins, aggregations]
+Gold Delta Tables (Star schema, business-ready)
+    ↓ [SQL: SELECT * FROM gold.dim_customers]
+Analytics / BI Tools
+```
 ## Transformation Logic
 
 ### Bronze Layer (Load)
@@ -103,16 +108,34 @@ df_clean.write.mode("overwrite").format("delta").saveAsTable(...)
 **Pattern**: Read Silver → Join Dimensions → Star Schema → Write Gold
 
 #### Dimensional Model (Star Schema)
-            dim_customers
-                ↓
-        (customer_id, first_name, gender, ...)
-                ↓
-fact_sales ← ← ← → dim_products
-(order_number,
- customer_key,
- product_key,          (product_id, product_name,
- order_date,            cost, category, ...)
- sales_amount)
+
+```
+                    ┌─────────────────────────┐
+                    │     dim_customers        │
+                    │  customer_id (PK)        │
+                    │  first_name, last_name   │
+                    │  gender, marital_status  │
+                    │  country, birthdate      │
+                    └────────────┬────────────┘
+                                 │
+                    ┌────────────▼────────────┐
+                    │       fact_sales         │
+                    │  order_number (PK)       │
+                    │  customer_key (FK) ──────┘
+                    │  product_key (FK) ───────┐
+                    │  order_date              │
+                    │  sales_amount            │
+                    │  quantity, price         │
+                    └────────────┬────────────┘
+                                 │
+                    ┌────────────▼────────────┐
+                    │      dim_products        │
+                    │  product_id (PK)         │
+                    │  product_name, cost      │
+                    │  category, subcategory   │
+                    │  product_line            │
+                    └─────────────────────────┘
+```
 
 #### Example: Build fact_sales
 
