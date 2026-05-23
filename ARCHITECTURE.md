@@ -1,4 +1,4 @@
-# Technical Architecture
+📐 # Technical Architecture 
 
 ## System Design
 
@@ -6,7 +6,7 @@
 
 ```
 Databricks Community Edition
-├── Catalog: databricks-medallion-lakehouse
+├── Catalogue: databricks-medallion-lakehouse
 │   ├── Schema: bronze
 │   │   ├── Volume: source_system (6 CSV files)
 │   │   └── Tables: cust_info, prd_info, sales_details, cust_az12, loc_a101, px_cat_g1v2
@@ -26,7 +26,7 @@ CSV Files (Volumes)
     ↓ [PySpark: spark.read.csv()]
 Bronze Delta Tables (Raw, no transforms)
     ↓ [PySpark: trim, when, dropDuplicates]
-Silver Delta Tables (Clean, standardized)
+Silver Delta Tables (Clean, standardised)
     ↓ [Spark SQL: joins, aggregations]
 Gold Delta Tables (Star schema, business-ready)
     ↓ [SQL: SELECT * FROM gold.dim_customers]
@@ -89,7 +89,7 @@ df_clean = df.select([
     for c in df.columns
 ])
 
-# Step 2: Standardize gender codes
+# Step 2: Standardise gender codes
 df_clean = df_clean.withColumn(
     "cst_gndr",
     when(col("cst_gndr") == "M", "Male")
@@ -264,5 +264,5 @@ def data_quality_check(df, table_name):
 2. **Orchestration** — Databricks Jobs with Bronze → Silver → Gold dependencies
 3. **Data Quality Monitoring** — Automated NULL/duplicate checks, SLA alerts
 4. **Slowly Changing Dimensions** — Type 2 SCD to track customer/product history
-5. **Access Control** — Row-level security, column masking via Unity Catalog
+5. **Access Control** — Row-level security, column masking via Unity Catalogue
 6. **CI/CD Pipeline** — Automated testing on pull requests before merge
