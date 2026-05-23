@@ -1,4 +1,4 @@
-📐 # Technical Architecture 
+# Technical Architecture 📐 
 
 ## System Design
 
